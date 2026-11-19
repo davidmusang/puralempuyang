@@ -459,13 +459,14 @@ const OperatorDashboard = () => {
                   <th>Kategori</th>
                   <th>Status</th>
                   <th>Slot</th>
+                  <th className="text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody>
                 {paginatedTickets.length ? (
                   paginatedTickets.map((ticket) => (
                     <tr key={ticket.ticket_code} className="border-t border-cream/50 text-sm dark:border-white/5">
-                      <td className="py-2 font-semibold">{ticket.ticket_code}</td>
+                      <td className="py-2 font-mono text-xs font-semibold">{ticket.ticket_code}</td>
                       <td>{ticket.customer || 'Tidak diketahui'}</td>
                       <td>
                         {ticket.category ? (
@@ -486,11 +487,25 @@ const OperatorDashboard = () => {
                       <td>
                         {ticket.visit_date} {ticket.start_time?.slice(0, 5)}
                       </td>
+                      <td className="py-2 text-right">
+                        {ticket.status === 'used' ? (
+                          <span className="text-xs text-ebony/40 dark:text-cream/40">Sudah dipakai</span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={mutation.isPending}
+                            onClick={() => mutation.mutate(ticket.ticket_code)}
+                            className="rounded-full bg-gold px-3 py-1 text-xs font-semibold text-ebony disabled:opacity-50"
+                          >
+                            Validasi
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5} className="py-6 text-center text-xs text-ebony/60 dark:text-cream/60">
+                    <td colSpan={6} className="py-6 text-center text-xs text-ebony/60 dark:text-cream/60">
                       Belum ada tiket pada daftar ini.
                     </td>
                   </tr>

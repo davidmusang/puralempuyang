@@ -135,12 +135,34 @@ class OperatorController extends Controller
     public function validateTicket(Request $request)
     {
         $data = Validator::make($request->all(), [
-            'ticket_code' => 'required|string|exists:order_items,ticket_code',
+            'ticket_code' => 'required|string',
         ])->validate();
 
+        $rawCode = strtoupper(trim($data['ticket_code']));
+
         $item = OrderItem::with(['ticketType', 'order' => fn ($q) => $q->with(['slot', 'user', 'ticketType'])])
-            ->where('ticket_code', $data['ticket_code'])
-            ->firstOrFail();
+            ->where('ticket_code', $rawCode)
+            ->first();
+
+        // Fallback: jika petugas memasukkan/memindai order_code (mis. PL-YYYYMMDD-XXXXXXXX)
+        if (!$item) {
+            $order = Order::with(['items.ticketType', 'slot', 'user', 'ticketType'])
+                ->where('order_code', $rawCode)
+                ->first();
+
+            if ($order && $order->items->isNotEmpty()) {
+                $item = $order->items->firstWhere('status', 'valid')
+                    ?? $order->items->firstWhere('status', '!=', 'used')
+                    ?? $order->items->first();
+                $item?->setRelation('order', $order);
+            }
+        }
+
+        if (!$item) {
+            return response()->json([
+                'message' => 'Kode tiket atau kode pesanan tidak ditemukan.',
+            ], 404);
+        }
 
         if ($item->status === 'used') {
             return response()->json([

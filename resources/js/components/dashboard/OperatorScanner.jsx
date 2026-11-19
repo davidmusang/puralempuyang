@@ -1,13 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 
-const getQrBoxSize = () => {
-  if (typeof window === 'undefined') {
-    return 260;
-  }
-  const responsiveSize = Math.floor(window.innerWidth * 0.45);
-  return Math.min(320, Math.max(220, responsiveSize));
-};
+// Antrean global agar proses stop() lama selesai 100% sebelum start() baru menyentuh DOM #qr-reader
+let previousCleanupPromise = Promise.resolve();
 
 const formatCameraError = (err) => {
   const raw = typeof err === 'string' ? err : err?.message || err?.name || '';
@@ -20,8 +15,38 @@ const formatCameraError = (err) => {
   if (/NotReadableError|TrackStartError/i.test(raw)) {
     return 'Kamera sedang dipakai aplikasi lain. Tutup aplikasi lain lalu klik "Reload Kamera".';
   }
-  return raw || 'Gagal membuka kamera. Pastikan situs dibuka lewat HTTPS dan izin kamera aktif.';
+  return raw || 'Gagal membuka kamera. Gunakan "Upload Gambar QR" atau masukkan kode manual.';
 };
+
+// Tambahkan border putih (quiet zone) pada gambar yang di-upload agar QR yang terpotong rapat tetap terbaca
+const createPaddedImageFile = (file) =>
+  new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const pad = Math.max(48, Math.floor(Math.max(img.width, img.height) * 0.15));
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width + pad * 2;
+      canvas.height = img.height + pad * 2;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, pad, pad, img.width, img.height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error('Gagal memproses gambar'));
+          return;
+        }
+        resolve(new File([blob], 'padded-qr.png', { type: 'image/png' }));
+      }, 'image/png');
+    };
+    img.onerror = (err) => {
+      URL.revokeObjectURL(url);
+      reject(err);
+    };
+    img.src = url;
+  });
 
 const OperatorScanner = ({ onResult }) => {
   const [error, setError] = useState(null);
@@ -33,7 +58,6 @@ const OperatorScanner = ({ onResult }) => {
   const fileInputRef = useRef(null);
   const callbackRef = useRef(onResult);
   const lastScannedRef = useRef({ code: null, time: 0 });
-  const qrboxSize = useMemo(() => getQrBoxSize(), []);
   const [isPaused, setIsPaused] = useState(false);
   const [restartToken, setRestartToken] = useState(0);
 
@@ -46,8 +70,6 @@ const OperatorScanner = ({ onResult }) => {
 
     let cancelled = false;
     const elementId = 'qr-reader';
-    const scanner = new Html5Qrcode(elementId);
-    html5QrcodeRef.current = scanner;
     setError(null);
     setStatusText('Menyiapkan kamera...');
 
@@ -62,9 +84,10 @@ const OperatorScanner = ({ onResult }) => {
       }
       lastScannedRef.current = { code, time: now };
 
+      const activeScanner = html5QrcodeRef.current;
       setIsPaused(true);
       try {
-        scanner.pause(true);
+        activeScanner?.pause(true);
       } catch (_) {
         /* ignore */
       }
@@ -75,9 +98,9 @@ const OperatorScanner = ({ onResult }) => {
         clearTimeout(resumeTimeoutRef.current);
       }
       resumeTimeoutRef.current = window.setTimeout(() => {
-        if (!cancelled && html5QrcodeRef.current === scanner) {
+        if (!cancelled && html5QrcodeRef.current === activeScanner) {
           try {
-            scanner.resume();
+            activeScanner?.resume();
           } catch (_) {
             /* ignore */
           }
@@ -88,53 +111,84 @@ const OperatorScanner = ({ onResult }) => {
 
     const scanConfig = {
       fps: 10,
-      qrbox: { width: qrboxSize, height: qrboxSize },
-      aspectRatio: 1.0,
+      qrbox: (viewfinderWidth, viewfinderHeight) => {
+        const minEdge = Math.min(viewfinderWidth || 250, viewfinderHeight || 250);
+        const boxSize = Math.max(140, Math.min(280, Math.floor(minEdge * 0.72)));
+        return { width: boxSize, height: boxSize };
+      },
+    };
+
+    const tryStartCandidate = async (cameraConstraint) => {
+      const container = document.getElementById(elementId);
+      if (container) {
+        container.innerHTML = '';
+      }
+      const instance = new Html5Qrcode(elementId);
+      html5QrcodeRef.current = instance;
+      await instance.start(cameraConstraint, scanConfig, onDecodeSuccess, () => {});
+      return instance;
     };
 
     const startWithFallback = async () => {
+      // Tunggu sampai cleanup scanner sebelumnya benar-benar selesai
+      await previousCleanupPromise.catch(() => {});
+      if (cancelled) return;
+
+      const candidates = [{ facingMode: 'environment' }, { facingMode: 'user' }];
+
       try {
-        let cameraConfig = { facingMode: 'environment' };
-
-        try {
-          const cameras = await Html5Qrcode.getCameras();
-          if (cancelled) return;
-          if (cameras && cameras.length > 0) {
-            const backCam = cameras.find((c) => /back|rear|environment/i.test(c.label || ''));
-            cameraConfig = backCam ? backCam.id : cameras[0].id;
-          }
-        } catch (_) {
-          // Lanjut pakai facingMode jika getCameras tidak tersedia sebelum izin diberikan
+        const cameras = await Html5Qrcode.getCameras();
+        if (cameras && cameras.length > 0) {
+          const backCam = cameras.find((c) => c.id && /back|rear|environment/i.test(c.label || ''));
+          if (backCam?.id) candidates.unshift(backCam.id);
+          cameras.forEach((c) => {
+            if (c.id && !candidates.includes(c.id)) {
+              candidates.push(c.id);
+            }
+          });
         }
+      } catch (_) {
+        // Abaikan jika getCameras gagal sebelum permission diberikan
+      }
 
+      let lastErr = null;
+      let startedInstance = null;
+
+      for (const candidate of candidates) {
         if (cancelled) return;
-
         try {
-          await scanner.start(cameraConfig, scanConfig, onDecodeSuccess, () => {});
-        } catch (firstErr) {
-          if (cancelled) return;
-          // Fallback ke kamera depan / default jika kamera belakang gagal (umum di laptop/PC)
-          await scanner.start({ facingMode: 'user' }, scanConfig, onDecodeSuccess, () => {});
-        }
-
-        if (cancelled) {
+          startedInstance = await tryStartCandidate(candidate);
+          break;
+        } catch (err) {
+          lastErr = err;
           try {
-            await scanner.stop();
-            scanner.clear();
+            html5QrcodeRef.current?.clear();
           } catch (_) {
             /* ignore */
           }
-          return;
+          html5QrcodeRef.current = null;
         }
+      }
 
+      if (cancelled) {
+        if (startedInstance) {
+          try {
+            await startedInstance.stop();
+            startedInstance.clear();
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        return;
+      }
+
+      if (startedInstance) {
         isRunningRef.current = true;
         setIsPaused(false);
         setStatusText('Kamera aktif — arahkan ke QR tiket');
-      } catch (err) {
-        if (!cancelled) {
-          setStatusText('');
-          setError(formatCameraError(err));
-        }
+      } else {
+        setStatusText('');
+        setError(formatCameraError(lastErr));
       }
     };
 
@@ -147,27 +201,30 @@ const OperatorScanner = ({ onResult }) => {
         resumeTimeoutRef.current = null;
       }
       const instance = html5QrcodeRef.current;
+      const wasRunning = isRunningRef.current;
       html5QrcodeRef.current = null;
+      isRunningRef.current = false;
+
       if (!instance) return;
 
-      const doStop = async () => {
-        try {
-          if (isRunningRef.current) {
-            await instance.stop();
+      previousCleanupPromise = previousCleanupPromise
+        .catch(() => {})
+        .then(async () => {
+          try {
+            if (wasRunning) {
+              await instance.stop();
+            }
+          } catch (_) {
+            /* ignore */
           }
-        } catch (_) {
-          /* ignore */
-        }
-        try {
-          instance.clear();
-        } catch (_) {
-          /* ignore */
-        }
-        isRunningRef.current = false;
-      };
-      doStop();
+          try {
+            instance.clear();
+          } catch (_) {
+            /* ignore */
+          }
+        });
     };
-  }, [qrboxSize, restartToken]);
+  }, [restartToken]);
 
   const handleManualSubmit = (e) => {
     e?.preventDefault();
@@ -189,9 +246,32 @@ const OperatorScanner = ({ onResult }) => {
     if (!file) return;
 
     setError(null);
+
+    // 1. Coba native BarcodeDetector jika didukung browser (Chrome/Edge/Android modern)
+    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+      try {
+        const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+        const bitmap = await createImageBitmap(file);
+        const barcodes = await detector.detect(bitmap);
+        if (barcodes?.[0]?.rawValue) {
+          callbackRef.current?.(barcodes[0].rawValue.trim());
+          return;
+        }
+      } catch (_) {
+        // Lanjut ke fallback Html5Qrcode
+      }
+    }
+
+    // 2. Coba scanFile langsung dengan Html5Qrcode, dan jika gagal coba versi dengan quiet-zone putih
     const fileScanner = new Html5Qrcode('qr-file-reader-hidden');
     try {
-      const decodedText = await fileScanner.scanFile(file, false);
+      let decodedText = null;
+      try {
+        decodedText = await fileScanner.scanFile(file, false);
+      } catch (_) {
+        const paddedFile = await createPaddedImageFile(file);
+        decodedText = await fileScanner.scanFile(paddedFile, false);
+      }
       const code = (decodedText || '').trim();
       if (code) {
         callbackRef.current?.(code);
@@ -199,7 +279,7 @@ const OperatorScanner = ({ onResult }) => {
         setError('QR tidak terbaca dari gambar tersebut.');
       }
     } catch (_) {
-      setError('QR tidak ditemukan pada gambar. Pastikan gambar QR jelas dan tidak terpotong.');
+      setError('QR tidak ditemukan pada gambar. Gunakan tombol "Unduh QR" pada tiket atau masukkan kode manual.');
     } finally {
       try {
         fileScanner.clear();
@@ -221,7 +301,7 @@ const OperatorScanner = ({ onResult }) => {
       <div
         id="qr-reader"
         className="mt-3 w-full overflow-hidden rounded-2xl bg-black/20"
-        style={{ minHeight: `${qrboxSize + 80}px`, maxHeight: 440 }}
+        style={{ minHeight: '280px', maxHeight: 440 }}
       />
       <div id="qr-file-reader-hidden" className="hidden" />
 
@@ -262,7 +342,7 @@ const OperatorScanner = ({ onResult }) => {
         <input
           value={manualCode}
           onChange={(e) => setManualCode(e.target.value)}
-          placeholder="Masukkan kode manual"
+          placeholder="Masukkan kode tiket / kode order"
           className="flex-1 rounded-2xl border border-cream/70 bg-transparent px-3 py-2 text-sm dark:border-white/20"
         />
         <button
