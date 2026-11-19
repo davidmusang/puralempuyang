@@ -29,7 +29,17 @@ class VisitSlot extends Model
 
     public function scopeUpcoming($query)
     {
-        return $query->whereDate('visit_date', '>=', now()->toDateString());
+        $now = now();
+        $today = $now->toDateString();
+        $currentTime = $now->format('H:i:s');
+
+        return $query->where(function ($q) use ($today, $currentTime) {
+            $q->whereDate('visit_date', '>', $today)
+                ->orWhere(function ($todayQuery) use ($today, $currentTime) {
+                    $todayQuery->whereDate('visit_date', '=', $today)
+                        ->whereTime('start_time', '>', $currentTime);
+                });
+        });
     }
 
     /**
