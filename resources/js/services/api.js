@@ -1,8 +1,17 @@
 import axios from 'axios';
 
-const API_BASE =
-  import.meta.env.VITE_API_URL ||
-  (typeof window !== 'undefined' ? `${window.location.origin}/api` : 'http://localhost:8000/api');
+const rawApiUrl = import.meta.env.VITE_API_URL;
+const isValidApiUrl =
+  typeof rawApiUrl === 'string' &&
+  rawApiUrl.trim() !== '' &&
+  !rawApiUrl.includes('${') &&
+  /^https?:\/\//i.test(rawApiUrl.trim());
+
+const API_BASE = isValidApiUrl
+  ? rawApiUrl.trim()
+  : typeof window !== 'undefined'
+    ? `${window.location.origin}/api`
+    : 'http://localhost:8000/api';
 
 export const AUTH_LOGOUT_EVENT = 'pl:auth-logout';
 
