@@ -1,315 +1,419 @@
-import { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import jsQR from 'jsqr';
 
-// Antrean global agar proses stop() lama selesai 100% sebelum start() baru menyentuh DOM #qr-reader
-let previousCleanupPromise = Promise.resolve();
+/**
+ * Pemindai QR petugas gerbang.
+ *
+ * Tidak lagi memakai html5-qrcode: library itu hanya memindai kotak kecil di tengah
+ * dan sering gagal membaca QR yang ditampilkan dari layar HP (silau, miring, kecil).
+ * Di sini kamera dibuka langsung lewat getUserMedia, lalu setiap frame dipindai:
+ *   1. BarcodeDetector bawaan browser (jika tersedia, paling cepat & akurat),
+ *   2. jsQR pada seluruh frame (normal + warna terbalik),
+ *   3. jsQR pada potongan tengah yang diperbesar (untuk QR yang kecil/jauh),
+ *   4. jsQR pada frame yang dicerminkan (beberapa webcam laptop mirror di level driver).
+ */
+
+const SCAN_INTERVAL_MS = 120;
+const MAX_SCAN_EDGE = 960;
+const DUPLICATE_WINDOW_MS = 3000;
+const COOLDOWN_AFTER_HIT_MS = 2000;
 
 const formatCameraError = (err) => {
-  const raw = typeof err === 'string' ? err : err?.message || err?.name || '';
-  if (/NotAllowedError|Permission denied|PermissionDismissed/i.test(raw)) {
-    return 'Izin kamera ditolak. Izinkan akses kamera di browser (ikon gembok di address bar), lalu klik "Reload Kamera".';
+  const raw = `${err?.name || ''} ${err?.message || err || ''}`;
+  if (!window.isSecureContext) {
+    return 'Kamera hanya bisa dibuka lewat HTTPS. Buka situs memakai alamat https://';
   }
-  if (/NotFoundError|Requested device not found|no camera/i.test(raw)) {
-    return 'Kamera tidak ditemukan pada perangkat ini. Gunakan "Upload Gambar QR" atau masukkan kode manual di bawah.';
+  if (/NotAllowed|Permission|denied/i.test(raw)) {
+    return 'Izin kamera ditolak. Klik ikon gembok di address bar → izinkan Kamera, lalu tekan "Muat Ulang Kamera".';
   }
-  if (/NotReadableError|TrackStartError/i.test(raw)) {
-    return 'Kamera sedang dipakai aplikasi lain. Tutup aplikasi lain lalu klik "Reload Kamera".';
+  if (/NotFound|DevicesNotFound|Overconstrained/i.test(raw)) {
+    return 'Kamera tidak ditemukan. Gunakan "Upload Gambar QR" atau ketik kode secara manual.';
   }
-  return raw || 'Gagal membuka kamera. Gunakan "Upload Gambar QR" atau masukkan kode manual.';
+  if (/NotReadable|TrackStart|in use/i.test(raw)) {
+    return 'Kamera sedang dipakai aplikasi lain (Zoom/WA/Meet). Tutup aplikasi tersebut lalu tekan "Muat Ulang Kamera".';
+  }
+  return 'Gagal membuka kamera. Gunakan "Upload Gambar QR" atau ketik kode secara manual.';
 };
 
-// Tambahkan border putih (quiet zone) pada gambar yang di-upload agar QR yang terpotong rapat tetap terbaca
-const createPaddedImageFile = (file) =>
-  new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      const pad = Math.max(48, Math.floor(Math.max(img.width, img.height) * 0.15));
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width + pad * 2;
-      canvas.height = img.height + pad * 2;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, pad, pad, img.width, img.height);
-      URL.revokeObjectURL(url);
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          reject(new Error('Gagal memproses gambar'));
-          return;
-        }
-        resolve(new File([blob], 'padded-qr.png', { type: 'image/png' }));
-      }, 'image/png');
-    };
-    img.onerror = (err) => {
-      URL.revokeObjectURL(url);
-      reject(err);
-    };
-    img.src = url;
-  });
+const createBarcodeDetector = async () => {
+  if (typeof window === 'undefined' || !('BarcodeDetector' in window)) return null;
+  try {
+    const formats = await window.BarcodeDetector.getSupportedFormats?.();
+    if (formats && !formats.includes('qr_code')) return null;
+    return new window.BarcodeDetector({ formats: ['qr_code'] });
+  } catch {
+    return null;
+  }
+};
+
+/** Jalankan jsQR pada area tertentu dari sumber (video/gambar) yang digambar ke canvas. */
+const decodeRegion = (ctx, canvas, source, region, { mirror = false, maxEdge = MAX_SCAN_EDGE } = {}) => {
+  const { sx, sy, sw, sh } = region;
+  if (!sw || !sh) return null;
+  const scale = Math.min(1, maxEdge / Math.max(sw, sh));
+  const cw = Math.max(1, Math.round(sw * scale));
+  const ch = Math.max(1, Math.round(sh * scale));
+  canvas.width = cw;
+  canvas.height = ch;
+  ctx.save();
+  if (mirror) {
+    ctx.translate(cw, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, cw, ch);
+  ctx.restore();
+  const image = ctx.getImageData(0, 0, cw, ch);
+  const result = jsQR(image.data, cw, ch, { inversionAttempts: 'attemptBoth' });
+  return result?.data?.trim() || null;
+};
+
+/** Pindai gambar statis (upload) dengan beberapa strategi, termasuk menambah bingkai putih. */
+const decodeImageElement = (img) => {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  const full = { sx: 0, sy: 0, sw: w, sh: h };
+
+  const direct =
+    decodeRegion(ctx, canvas, img, full, { maxEdge: 1400 }) ||
+    decodeRegion(ctx, canvas, img, full, { maxEdge: 700 });
+  if (direct) return direct;
+
+  // Tambahkan quiet zone putih untuk screenshot yang terpotong rapat di tepi QR.
+  const pad = Math.max(48, Math.round(Math.max(w, h) * 0.15));
+  const padded = document.createElement('canvas');
+  padded.width = w + pad * 2;
+  padded.height = h + pad * 2;
+  const pctx = padded.getContext('2d');
+  pctx.fillStyle = '#FFFFFF';
+  pctx.fillRect(0, 0, padded.width, padded.height);
+  pctx.drawImage(img, pad, pad, w, h);
+  return decodeRegion(ctx, canvas, padded, { sx: 0, sy: 0, sw: padded.width, sh: padded.height }, { maxEdge: 1400 });
+};
 
 const OperatorScanner = ({ onResult }) => {
-  const [error, setError] = useState(null);
-  const [statusText, setStatusText] = useState('Menyiapkan kamera...');
-  const [manualCode, setManualCode] = useState('');
-  const html5QrcodeRef = useRef(null);
-  const isRunningRef = useRef(false);
-  const resumeTimeoutRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const callbackRef = useRef(onResult);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const timerRef = useRef(null);
+  const detectorRef = useRef(null);
+  const scanningRef = useRef(false);
+  const frameCountRef = useRef(0);
+  const cooldownUntilRef = useRef(0);
   const lastScannedRef = useRef({ code: null, time: 0 });
-  const [isPaused, setIsPaused] = useState(false);
+  const callbackRef = useRef(onResult);
+  const fileInputRef = useRef(null);
+
+  const [status, setStatus] = useState('starting'); // starting | active | error
+  const [error, setError] = useState(null);
+  const [cameras, setCameras] = useState([]);
+  const [deviceId, setDeviceId] = useState('');
+  const [lastDetected, setLastDetected] = useState(null);
   const [restartToken, setRestartToken] = useState(0);
+  const [manualCode, setManualCode] = useState('');
 
   useEffect(() => {
     callbackRef.current = onResult;
   }, [onResult]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
+  const emitCode = useCallback((rawCode) => {
+    const code = (rawCode || '').trim();
+    if (!code) return false;
+    const now = Date.now();
+    const last = lastScannedRef.current;
+    if (last.code === code && now - last.time < DUPLICATE_WINDOW_MS) return false;
 
-    let cancelled = false;
-    const elementId = 'qr-reader';
-    setError(null);
-    setStatusText('Menyiapkan kamera...');
+    lastScannedRef.current = { code, time: now };
+    cooldownUntilRef.current = now + COOLDOWN_AFTER_HIT_MS;
+    setLastDetected({ code, time: now });
+    setTimeout(() => {
+      setLastDetected((current) => (current && current.time === now ? null : current));
+    }, 4000);
+    try {
+      navigator.vibrate?.(120);
+    } catch {
+      /* ignore */
+    }
+    callbackRef.current?.(code);
+    return true;
+  }, []);
 
-    const onDecodeSuccess = (decodedText) => {
-      const code = (decodedText || '').trim();
-      if (!code) return;
-
-      const now = Date.now();
-      const last = lastScannedRef.current;
-      if (last.code === code && now - last.time < 3000) {
-        return;
-      }
-      lastScannedRef.current = { code, time: now };
-
-      const activeScanner = html5QrcodeRef.current;
-      setIsPaused(true);
+  const stopCamera = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    scanningRef.current = false;
+    const stream = streamRef.current;
+    streamRef.current = null;
+    stream?.getTracks().forEach((track) => {
       try {
-        activeScanner?.pause(true);
-      } catch (_) {
+        track.stop();
+      } catch {
         /* ignore */
       }
+    });
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }, []);
 
-      callbackRef.current?.(code);
+  const scanFrame = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video || !streamRef.current) return;
+    if (scanningRef.current || Date.now() < cooldownUntilRef.current) return;
+    if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
 
-      if (resumeTimeoutRef.current) {
-        clearTimeout(resumeTimeoutRef.current);
-      }
-      resumeTimeoutRef.current = window.setTimeout(() => {
-        if (!cancelled && html5QrcodeRef.current === activeScanner) {
-          try {
-            activeScanner?.resume();
-          } catch (_) {
-            /* ignore */
-          }
-          setIsPaused(false);
-        }
-      }, 2500);
-    };
-
-    const scanConfig = {
-      fps: 10,
-      qrbox: (viewfinderWidth, viewfinderHeight) => {
-        const minEdge = Math.min(viewfinderWidth || 250, viewfinderHeight || 250);
-        const boxSize = Math.max(140, Math.min(280, Math.floor(minEdge * 0.72)));
-        return { width: boxSize, height: boxSize };
-      },
-    };
-
-    const tryStartCandidate = async (cameraConstraint) => {
-      const container = document.getElementById(elementId);
-      if (container) {
-        container.innerHTML = '';
-      }
-      const instance = new Html5Qrcode(elementId);
-      html5QrcodeRef.current = instance;
-      await instance.start(cameraConstraint, scanConfig, onDecodeSuccess, () => {});
-      return instance;
-    };
-
-    const startWithFallback = async () => {
-      // Tunggu sampai cleanup scanner sebelumnya benar-benar selesai
-      await previousCleanupPromise.catch(() => {});
-      if (cancelled) return;
-
-      const candidates = [{ facingMode: 'environment' }, { facingMode: 'user' }];
-
-      try {
-        const cameras = await Html5Qrcode.getCameras();
-        if (cameras && cameras.length > 0) {
-          const backCam = cameras.find((c) => c.id && /back|rear|environment/i.test(c.label || ''));
-          if (backCam?.id) candidates.unshift(backCam.id);
-          cameras.forEach((c) => {
-            if (c.id && !candidates.includes(c.id)) {
-              candidates.push(c.id);
-            }
-          });
-        }
-      } catch (_) {
-        // Abaikan jika getCameras gagal sebelum permission diberikan
-      }
-
-      let lastErr = null;
-      let startedInstance = null;
-
-      for (const candidate of candidates) {
-        if (cancelled) return;
+    scanningRef.current = true;
+    try {
+      // 1) Detektor bawaan browser
+      if (detectorRef.current) {
         try {
-          startedInstance = await tryStartCandidate(candidate);
+          const codes = await detectorRef.current.detect(video);
+          const value = codes?.find((c) => c.rawValue)?.rawValue;
+          if (value && emitCode(value)) return;
+        } catch {
+          detectorRef.current = null; // jatuh ke jsQR bila detektor bermasalah
+        }
+      }
+
+      // 2-4) jsQR, strategi bergiliran per frame agar tetap ringan
+      if (!canvasRef.current) {
+        canvasRef.current = document.createElement('canvas');
+      }
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      const turn = frameCountRef.current++ % 4;
+
+      let value = null;
+      if (turn === 0 || turn === 2) {
+        value = decodeRegion(ctx, canvas, video, { sx: 0, sy: 0, sw: vw, sh: vh });
+      } else if (turn === 1) {
+        const side = Math.round(Math.min(vw, vh) * 0.6);
+        value = decodeRegion(ctx, canvas, video, {
+          sx: Math.round((vw - side) / 2),
+          sy: Math.round((vh - side) / 2),
+          sw: side,
+          sh: side,
+        });
+      } else {
+        value = decodeRegion(ctx, canvas, video, { sx: 0, sy: 0, sw: vw, sh: vh }, { mirror: true });
+      }
+
+      if (value) emitCode(value);
+    } finally {
+      scanningRef.current = false;
+    }
+  }, [emitCode]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loop = async () => {
+      if (cancelled) return;
+      await scanFrame();
+      if (!cancelled) {
+        timerRef.current = setTimeout(loop, SCAN_INTERVAL_MS);
+      }
+    };
+
+    const start = async () => {
+      stopCamera();
+      setStatus('starting');
+      setError(null);
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setStatus('error');
+        setError(formatCameraError(new Error('NotFound')));
+        return;
+      }
+
+      const videoConstraints = deviceId
+        ? { deviceId: { exact: deviceId } }
+        : { facingMode: { ideal: 'environment' } };
+
+      const attempts = [
+        { video: { ...videoConstraints, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+        { video: videoConstraints, audio: false },
+        { video: true, audio: false },
+      ];
+
+      let stream = null;
+      let lastErr = null;
+      for (const constraints of attempts) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
           break;
         } catch (err) {
           lastErr = err;
-          try {
-            html5QrcodeRef.current?.clear();
-          } catch (_) {
-            /* ignore */
-          }
-          html5QrcodeRef.current = null;
+          if (/NotAllowed|Permission/i.test(`${err?.name} ${err?.message}`)) break;
         }
       }
 
       if (cancelled) {
-        if (startedInstance) {
-          try {
-            await startedInstance.stop();
-            startedInstance.clear();
-          } catch (_) {
-            /* ignore */
-          }
-        }
+        stream?.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      if (!stream) {
+        setStatus('error');
+        setError(formatCameraError(lastErr));
         return;
       }
 
-      if (startedInstance) {
-        isRunningRef.current = true;
-        setIsPaused(false);
-        setStatusText('Kamera aktif — arahkan ke QR tiket');
-      } else {
-        setStatusText('');
-        setError(formatCameraError(lastErr));
+      streamRef.current = stream;
+
+      // Fokus otomatis kontinu bila didukung (membantu membaca layar HP dari dekat)
+      const [track] = stream.getVideoTracks();
+      try {
+        const caps = track?.getCapabilities?.();
+        if (caps?.focusMode?.includes('continuous')) {
+          await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+        }
+      } catch {
+        /* ignore */
       }
+
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = stream;
+        video.setAttribute('playsinline', 'true');
+        video.muted = true;
+        try {
+          await video.play();
+        } catch {
+          /* autoplay diblokir jarang terjadi karena video muted */
+        }
+      }
+
+      detectorRef.current = await createBarcodeDetector();
+
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (!cancelled) {
+          setCameras(devices.filter((d) => d.kind === 'videoinput'));
+        }
+      } catch {
+        /* ignore */
+      }
+
+      if (cancelled) return;
+      setStatus('active');
+      loop();
     };
 
-    startWithFallback();
+    start();
 
     return () => {
       cancelled = true;
-      if (resumeTimeoutRef.current) {
-        clearTimeout(resumeTimeoutRef.current);
-        resumeTimeoutRef.current = null;
-      }
-      const instance = html5QrcodeRef.current;
-      const wasRunning = isRunningRef.current;
-      html5QrcodeRef.current = null;
-      isRunningRef.current = false;
-
-      if (!instance) return;
-
-      previousCleanupPromise = previousCleanupPromise
-        .catch(() => {})
-        .then(async () => {
-          try {
-            if (wasRunning) {
-              await instance.stop();
-            }
-          } catch (_) {
-            /* ignore */
-          }
-          try {
-            instance.clear();
-          } catch (_) {
-            /* ignore */
-          }
-        });
+      stopCamera();
     };
-  }, [restartToken]);
+  }, [deviceId, restartToken, scanFrame, stopCamera]);
+
+  const handleRestart = () => setRestartToken((t) => t + 1);
 
   const handleManualSubmit = (e) => {
     e?.preventDefault();
     const code = manualCode.trim();
     if (!code) return;
+    lastScannedRef.current = { code: null, time: 0 };
     callbackRef.current?.(code);
     setManualCode('');
-  };
-
-  const handleRestart = () => {
-    setError(null);
-    setIsPaused(false);
-    setRestartToken((token) => token + 1);
   };
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-
     setError(null);
 
-    // 1. Coba native BarcodeDetector jika didukung browser (Chrome/Edge/Android modern)
-    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
-      try {
-        const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-        const bitmap = await createImageBitmap(file);
-        const barcodes = await detector.detect(bitmap);
-        if (barcodes?.[0]?.rawValue) {
-          callbackRef.current?.(barcodes[0].rawValue.trim());
-          return;
-        }
-      } catch (_) {
-        // Lanjut ke fallback Html5Qrcode
-      }
-    }
-
-    // 2. Coba scanFile langsung dengan Html5Qrcode, dan jika gagal coba versi dengan quiet-zone putih
-    const fileScanner = new Html5Qrcode('qr-file-reader-hidden');
+    const url = URL.createObjectURL(file);
     try {
-      let decodedText = null;
-      try {
-        decodedText = await fileScanner.scanFile(file, false);
-      } catch (_) {
-        const paddedFile = await createPaddedImageFile(file);
-        decodedText = await fileScanner.scanFile(paddedFile, false);
+      const img = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = reject;
+        image.src = url;
+      });
+
+      let value = null;
+      const detector = await createBarcodeDetector();
+      if (detector) {
+        try {
+          const codes = await detector.detect(img);
+          value = codes?.find((c) => c.rawValue)?.rawValue || null;
+        } catch {
+          /* fallback ke jsQR */
+        }
       }
-      const code = (decodedText || '').trim();
-      if (code) {
-        callbackRef.current?.(code);
+      if (!value) value = decodeImageElement(img);
+
+      if (value) {
+        lastScannedRef.current = { code: null, time: 0 };
+        emitCode(value);
       } else {
-        setError('QR tidak terbaca dari gambar tersebut.');
+        setError('QR tidak ditemukan pada gambar. Pastikan QR terlihat utuh dan tidak buram.');
       }
-    } catch (_) {
-      setError('QR tidak ditemukan pada gambar. Gunakan tombol "Unduh QR" pada tiket atau masukkan kode manual.');
+    } catch {
+      setError('Gagal membaca gambar.');
     } finally {
-      try {
-        fileScanner.clear();
-      } catch (_) {
-        /* ignore */
-      }
+      URL.revokeObjectURL(url);
     }
   };
 
+  const statusLabel =
+    status === 'active'
+      ? 'Kamera aktif — arahkan QR ke kotak'
+      : status === 'starting'
+        ? 'Menyiapkan kamera...'
+        : 'Kamera tidak aktif';
+
   return (
     <div className="glass-panel rounded-3xl p-5">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-semibold">Scan QR</p>
-        {statusText && !error && (
-          <span className="text-xs text-ebony/60 dark:text-cream/60">{statusText}</span>
-        )}
+        <span
+          className={`text-xs ${
+            status === 'active'
+              ? 'text-emerald-600 dark:text-emerald-400'
+              : status === 'error'
+                ? 'text-red-500'
+                : 'text-ebony/60 dark:text-cream/60'
+          }`}
+        >
+          {statusLabel}
+        </span>
       </div>
 
-      <div
-        id="qr-reader"
-        className="mt-3 w-full overflow-hidden rounded-2xl bg-black/20"
-        style={{ minHeight: '280px', maxHeight: 440 }}
-      />
-      <div id="qr-file-reader-hidden" className="hidden" />
+      <div className="relative mt-3 w-full overflow-hidden rounded-2xl bg-black" style={{ aspectRatio: '4 / 3' }}>
+        <video ref={videoRef} className="h-full w-full object-cover" playsInline muted autoPlay />
 
-      {isPaused && (
-        <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-          Scanner paused sesaat setelah validasi.
-        </p>
-      )}
+        {/* Panduan bidik: hanya visual, pemindaian tetap dilakukan pada seluruh frame */}
+        {status === 'active' && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="relative h-[62%] aspect-square rounded-2xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.25)]">
+              <span className="absolute -left-0.5 -top-0.5 h-6 w-6 rounded-tl-2xl border-l-4 border-t-4 border-gold" />
+              <span className="absolute -right-0.5 -top-0.5 h-6 w-6 rounded-tr-2xl border-r-4 border-t-4 border-gold" />
+              <span className="absolute -bottom-0.5 -left-0.5 h-6 w-6 rounded-bl-2xl border-b-4 border-l-4 border-gold" />
+              <span className="absolute -bottom-0.5 -right-0.5 h-6 w-6 rounded-br-2xl border-b-4 border-r-4 border-gold" />
+            </div>
+          </div>
+        )}
+
+        {status !== 'active' && (
+          <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-xs text-white/80">
+            {status === 'starting' ? 'Menyiapkan kamera...' : 'Kamera tidak aktif'}
+          </div>
+        )}
+
+        {lastDetected && (
+          <div className="absolute inset-x-3 bottom-3 rounded-xl bg-emerald-600/90 px-3 py-2 text-center text-xs font-semibold text-white">
+            QR terbaca: <span className="font-mono">{lastDetected.code}</span>
+          </div>
+        )}
+      </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button
@@ -317,7 +421,7 @@ const OperatorScanner = ({ onResult }) => {
           onClick={handleRestart}
           className="text-xs font-semibold text-gold underline-offset-2 hover:underline"
         >
-          Reload Kamera
+          Muat Ulang Kamera
         </button>
         <span className="text-xs text-ebony/30 dark:text-cream/30">|</span>
         <button
@@ -327,16 +431,29 @@ const OperatorScanner = ({ onResult }) => {
         >
           Upload Gambar QR
         </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleFileUpload}
-          className="hidden"
-        />
+        <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
+
+        {cameras.length > 1 && (
+          <select
+            value={deviceId}
+            onChange={(e) => setDeviceId(e.target.value)}
+            className="ml-auto max-w-[55%] rounded-xl border border-cream/70 bg-white px-2 py-1 text-xs text-ebony dark:border-white/20 dark:bg-ebony/60 dark:text-cream"
+          >
+            <option value="">Kamera otomatis</option>
+            {cameras.map((cam, idx) => (
+              <option key={cam.deviceId || idx} value={cam.deviceId}>
+                {cam.label || `Kamera ${idx + 1}`}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {error && <p className="mt-2 text-xs text-red-500 dark:text-red-400">{error}</p>}
+
+      <p className="mt-2 text-[11px] text-ebony/50 dark:text-cream/50">
+        Tips: naikkan kecerahan layar HP pengunjung, jauhkan ±15–25 cm dari kamera, dan hindari pantulan lampu.
+      </p>
 
       <form onSubmit={handleManualSubmit} className="mt-4 flex gap-2">
         <input
@@ -345,10 +462,7 @@ const OperatorScanner = ({ onResult }) => {
           placeholder="Masukkan kode tiket / kode order"
           className="flex-1 rounded-2xl border border-cream/70 bg-transparent px-3 py-2 text-sm dark:border-white/20"
         />
-        <button
-          type="submit"
-          className="rounded-2xl bg-gold px-4 text-sm font-semibold text-ebony"
-        >
+        <button type="submit" className="rounded-2xl bg-gold px-4 text-sm font-semibold text-ebony">
           Validasi
         </button>
       </form>
