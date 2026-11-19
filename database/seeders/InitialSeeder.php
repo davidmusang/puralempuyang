@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Hash;
 class InitialSeeder extends Seeder
 {
     /** Jumlah hari ke depan yang dibuatkan slot kunjungan. */
-    private const SLOT_DAYS = 7;
+    private const SLOT_DAYS = 14;
 
     public function run(): void
     {
@@ -126,7 +126,7 @@ class InitialSeeder extends Seeder
 
         // Satu sesi = satu slot dengan satu kuota bersama. Tarif domestik dipakai
         // sebagai tipe kanonik; tarif mancanegara menempel lewat experience_code.
-        foreach (range(1, self::SLOT_DAYS) as $dayOffset) {
+        foreach (range(0, self::SLOT_DAYS) as $dayOffset) {
             $date = Carbon::now()->addDays($dayOffset)->toDateString();
 
             foreach ($experiences as $experience) {
