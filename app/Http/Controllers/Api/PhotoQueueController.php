@@ -8,6 +8,7 @@ use App\Models\PhotoAsset;
 use App\Models\PhotoPoint;
 use App\Models\PhotoQueueEntry;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
@@ -133,7 +134,10 @@ class PhotoQueueController extends Controller
                     ->update(['status' => 'skipped']);
             }
         }
-        $entries = PhotoQueueEntry::with(['order', 'assets'])
+        $entries = PhotoQueueEntry::with([
+                'order',
+                'assets:id,photo_queue_entry_id,file_path,mime,size,created_at',
+            ])
             ->when($point, fn($q) => $q->where('photo_point_id', $point))
             ->whereDate('visit_date', $date)
             ->orderBy('queue_number')
@@ -213,20 +217,23 @@ class PhotoQueueController extends Controller
     {
         $data = Validator::make($request->all(), [
             'entry_id' => 'required|exists:photo_queue_entries,id',
-            'files.*' => 'required|file|mimes:jpg,jpeg,png|max:5120',
+            'files' => 'required|array|min:1',
+            'files.*' => 'required|file|mimes:jpg,jpeg,png,webp|max:5120',
         ])->validate();
         $entry = PhotoQueueEntry::findOrFail($data['entry_id']);
 
         $saved = [];
         foreach ($request->file('files', []) as $file) {
+            $binary = file_get_contents($file->getRealPath());
             $path = $file->store('photos/'.$entry->id, 'public');
             // Normalize Windows backslashes to URL-friendly slashes
             $path = str_replace('\\', '/', $path);
             $asset = PhotoAsset::create([
                 'photo_queue_entry_id' => $entry->id,
                 'file_path' => $path,
-                'mime' => $file->getClientMimeType(),
+                'mime' => $file->getMimeType() ?: $file->getClientMimeType() ?: 'image/jpeg',
                 'size' => $file->getSize(),
+                'content' => $binary !== false ? $binary : null,
             ]);
             $saved[] = $asset;
         }
@@ -236,24 +243,72 @@ class PhotoQueueController extends Controller
     public function myAssets(Request $request)
     {
         $user = $request->user();
-        $assets = PhotoAsset::select(['photo_assets.*'])
+        $assets = PhotoAsset::select([
+                'photo_assets.id',
+                'photo_assets.photo_queue_entry_id',
+                'photo_assets.file_path',
+                'photo_assets.mime',
+                'photo_assets.size',
+                'photo_assets.created_at',
+                DB::raw('(photo_assets.content IS NOT NULL) as has_content'),
+            ])
             ->join('photo_queue_entries', 'photo_queue_entries.id', '=', 'photo_assets.photo_queue_entry_id')
             ->join('orders', 'orders.id', '=', 'photo_queue_entries.order_id')
             ->where('orders.user_id', $user->id)
             ->orderByDesc('photo_assets.created_at')
             ->limit(100)
             ->get()
+            ->filter(function ($asset) {
+                $path = str_replace('\\', '/', (string) $asset->file_path);
+                return (bool) $asset->has_content || ($path !== '' && Storage::disk('public')->exists($path));
+            })
             ->map(function ($asset) {
-                $path = str_replace('\\', '/', $asset->file_path);
                 return [
                     'id' => $asset->id,
-                    'url' => Storage::disk('public')->url($path),
+                    'url' => "/photo-assets/{$asset->id}",
+                    'download_url' => "/photo-assets/{$asset->id}?download=1",
                     'mime' => $asset->mime,
                     'size' => $asset->size,
                     'created_at' => $asset->created_at?->toDateTimeString(),
                 ];
-            });
+            })
+            ->values();
 
         return response()->json(['data' => $assets]);
+    }
+
+    public function serveAsset(Request $request, PhotoAsset $photoAsset)
+    {
+        $path = str_replace('\\', '/', (string) $photoAsset->file_path);
+        $bytes = null;
+
+        if ($path !== '' && Storage::disk('public')->exists($path)) {
+            $bytes = Storage::disk('public')->get($path);
+        } elseif ($photoAsset->content !== null) {
+            $bytes = is_resource($photoAsset->content)
+                ? stream_get_contents($photoAsset->content)
+                : $photoAsset->content;
+        }
+
+        if ($bytes === null || $bytes === '') {
+            abort(404, 'Foto tidak ditemukan');
+        }
+
+        $mime = $photoAsset->mime ?: 'image/jpeg';
+        $ext = match ($mime) {
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            default => 'jpg',
+        };
+        $filename = "foto-pura-lempuyang-{$photoAsset->id}.{$ext}";
+        $disposition = $request->boolean('download') ? 'attachment' : 'inline';
+
+        return response($bytes, 200, [
+            'Content-Type' => $mime,
+            'Content-Length' => (string) strlen($bytes),
+            'Content-Disposition' => "{$disposition}; filename=\"{$filename}\"",
+            'Cache-Control' => 'public, max-age=86400',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 }

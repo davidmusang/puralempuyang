@@ -35,6 +35,8 @@ const UserDashboard = () => {
       const { data } = await api.get(endpoints.photoMyAssets);
       return data.data || [];
     },
+    enabled: Boolean(token),
+    refetchInterval: 10000,
   });
 
   const PAGE_SIZE = 5;
@@ -348,10 +350,8 @@ const UserDashboard = () => {
             {/* Tombol Aksi */}
             <div className="mt-4 flex items-center gap-3">
               <a
-                href={selectedPhoto.url}
-                download
-                target="_blank"
-                rel="noreferrer"
+                href={selectedPhoto.download_url || `${selectedPhoto.url}?download=1`}
+                download={`foto-pura-lempuyang-${selectedPhoto.id}.jpg`}
                 className="inline-flex items-center gap-2 rounded-xl bg-gold px-5 py-2.5 text-sm font-semibold text-ebony shadow hover:brightness-110 transition-all"
               >
                 <Download size={16} /> Unduh Foto

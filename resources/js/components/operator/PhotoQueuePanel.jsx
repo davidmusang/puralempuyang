@@ -14,11 +14,11 @@ const PhotoQueuePanel = () => {
     if (!pointId && points?.length) setPointId(points[0].id);
   }, [points, pointId]);
 
-  const todayISO = new Date().toISOString().slice(0,10);
+  const todayISO = new Date().toLocaleDateString('en-CA');
   const [selectedDate, setSelectedDate] = useState(todayISO);
 
   const { data: queueData } = useQuery({
-    queryKey: ['photo-queue', pointId],
+    queryKey: ['photo-queue', pointId, selectedDate],
     queryFn: async () => {
       if (!pointId) return [];
       const { data } = await api.get(endpoints.photoQueueList, { params: { point_id: pointId, date: selectedDate } });
@@ -49,19 +49,22 @@ const PhotoQueuePanel = () => {
   const list = queueData || [];
   const nowServing = list.find((e) => e.status === 'called' || e.status === 'shooting');
 
-  const uploadFiles = async (files) => {
-    if (!nowServing) return;
+  const uploadFiles = async (e) => {
+    const files = e.target.files;
+    if (!nowServing || !files?.length) return;
     const fd = new FormData();
     fd.append('entry_id', nowServing.id);
-    Array.from(files || []).forEach((f) => fd.append('files[]', f));
+    Array.from(files).forEach((f) => fd.append('files[]', f));
     try {
       await api.post(endpoints.photoUpload, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       toast.success('Foto diunggah');
-      queryClient.invalidateQueries({ queryKey: ['photo-queue', pointId] });
-    } catch (e) {
-      toast.error('Gagal unggah foto');
+      queryClient.invalidateQueries({ queryKey: ['photo-queue', pointId, selectedDate] });
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Gagal unggah foto (format JPG/PNG/WebP maks. 5MB)');
+    } finally {
+      e.target.value = '';
     }
   };
   const waiting = list.filter((e) => e.status === 'waiting');
@@ -141,7 +144,7 @@ const PhotoQueuePanel = () => {
                 <button onClick={() => skip.mutate(nowServing.id)} className="rounded-xl border px-3 py-2 text-sm">Skip</button>
                 <label className="rounded-xl border px-3 py-2 text-sm cursor-pointer">
                   Upload Foto
-                  <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => uploadFiles(e.target.files)} />
+                  <input type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={uploadFiles} />
                 </label>
               </div>
             </div>
@@ -195,11 +198,14 @@ const PhotoQueuePanel = () => {
         <div className="mt-4 rounded-2xl border border-cream/60 p-4 dark:border-white/10">
           <p className="text-xs uppercase tracking-[0.3em] text-gold">Foto Terunggah</p>
           <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-            {nowServing.assets.map((a) => (
-              <a key={a.id} href={`/storage/${a.file_path}`} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl border border-cream/50">
-                <img src={`/storage/${a.file_path}`} alt="Foto" className="h-32 w-full object-cover" />
-              </a>
-            ))}
+            {nowServing.assets.map((a) => {
+              const photoUrl = a.url || `/photo-assets/${a.id}`;
+              return (
+                <a key={a.id} href={photoUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl border border-cream/50">
+                  <img src={photoUrl} alt="Foto" className="h-32 w-full object-cover" />
+                </a>
+              );
+            })}
           </div>
         </div>
       ) : null}
