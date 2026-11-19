@@ -188,17 +188,17 @@ const OperatorDashboard = () => {
   });
 
   return (
-    <div className="min-h-screen bg-cream text-ebony dark:bg-ebony dark:text-cream">
+    <div className="min-h-screen overflow-x-hidden bg-cream text-ebony dark:bg-ebony dark:text-cream">
       <Navbar />
-      <main className="mx-auto max-w-6xl px-6 pt-28 pb-20 space-y-10">
+      <main className="mx-auto max-w-6xl px-4 sm:px-6 pt-24 sm:pt-28 pb-16 sm:pb-20 space-y-6 sm:space-y-10">
         {/* Offline indicator + Sync */}
-        <div className="flex items-center justify-between rounded-2xl border border-cream/60 p-3 text-xs dark:border-white/10">
-          <span className={navigator.onLine ? 'text-green-600' : 'text-amber-600'}>
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-cream/60 p-3 text-xs dark:border-white/10">
+          <span className={navigator.onLine ? 'font-semibold text-green-600 dark:text-green-400' : 'font-semibold text-amber-600 dark:text-amber-400'}>
             {navigator.onLine ? 'ONLINE' : 'OFFLINE (scan tetap bisa, sinkron saat online)'}
           </span>
           <button
             type="button"
-            className="rounded-full border border-cream/60 px-3 py-1 dark:border-white/20"
+            className="shrink-0 rounded-full border border-cream/60 px-3 py-1.5 font-medium dark:border-white/20"
             onClick={async () => {
               try {
                 // Pull fresh snapshot when online
@@ -226,7 +226,7 @@ const OperatorDashboard = () => {
           </button>
         </div>
         {/* ======= STAT CARD ======= */}
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4">
           <MetricCard title="Validasi Hari Ini" value={stats?.validated_today || 0} icon={ShieldCheck} />
           <MetricCard title="Total Tiket" value={ticketsList.length || 0} icon={Ticket} />
         </div>
@@ -234,14 +234,14 @@ const OperatorDashboard = () => {
         {/* ======= SCANNER + LOG ======= */}
         <section className="grid gap-6 lg:grid-cols-[1.2fr_1fr] items-start">
           {/* KIRI - QR Scanner */}
-          <div className="space-y-3">
+          <div className="min-w-0 space-y-3">
             <OperatorScanner onResult={(code) => {
               // Jangan kirim request ganda untuk kode yang sama
               if (mutation.isPending || pendingCodeRef.current === code) return;
               pendingCodeRef.current = code;
               mutation.mutate(code);
             }} />
-            <div className="flex flex-wrap items-center gap-3 text-xs text-amber-700">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-amber-700 dark:text-amber-400">
               <button
                 type="button"
                 onClick={armBeep}
@@ -251,51 +251,51 @@ const OperatorDashboard = () => {
               </button>
               {!audioReady && <span>Tekan sekali sebelum memindai.</span>}
               {beepInfo && (
-                <span className={audioReady ? 'text-emerald-600' : 'text-red-500'}>{beepInfo}</span>
+                <span className={audioReady ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}>{beepInfo}</span>
               )}
             </div>
 
             {/* ======= HASIL PEMINDAIAN + VERIFIKASI IDENTITAS ======= */}
             {scan ? (
-              <div className="glass-panel rounded-3xl p-5 space-y-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
+              <div className="glass-panel rounded-3xl p-4 sm:p-5 space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
                     <p className="text-sm text-gold">Hasil Pemindaian</p>
-                    <p className="font-mono text-[13px] text-ebony/70 dark:text-cream/70">{scan.ticket_code}</p>
+                    <p className="font-mono text-xs sm:text-[13px] break-all text-ebony/70 dark:text-cream/70">{scan.ticket_code}</p>
                   </div>
                   <span
-                    className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] ${
+                    className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] ${
                       scan.state === 'valid'
-                        ? 'bg-emerald-500/15 text-emerald-600'
+                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
                         : scan.state === 'offline'
-                          ? 'bg-amber-500/15 text-amber-600'
-                          : 'bg-red-500/15 text-red-600'
+                          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                          : 'bg-red-500/15 text-red-600 dark:text-red-400'
                     }`}
                   >
                     {scan.state === 'valid' ? 'Valid' : scan.state === 'offline' ? 'Offline' : 'Ditolak'}
                   </span>
                 </div>
 
-                {scan.reason && <p className="text-sm font-semibold text-red-600">{scan.reason}</p>}
+                {scan.reason && <p className="text-sm font-semibold text-red-600 dark:text-red-400">{scan.reason}</p>}
 
                 {/* Kategori harga — inti verifikasi di gerbang */}
                 {scan.category ? (
                   <div
-                    className={`rounded-2xl border p-4 ${
+                    className={`rounded-2xl border p-3.5 sm:p-4 ${
                       scan.requires_id_check
                         ? 'border-amber-500/40 bg-amber-500/10'
                         : 'border-sky-500/40 bg-sky-500/10'
                     }`}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {scan.requires_id_check ? (
-                        <UserCheck className="h-5 w-5 text-amber-600" />
+                        <UserCheck className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
                       ) : (
-                        <Globe className="h-5 w-5 text-sky-600" />
+                        <Globe className="h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" />
                       )}
                       <span
-                        className={`text-lg font-bold ${
-                          scan.requires_id_check ? 'text-amber-700' : 'text-sky-700'
+                        className={`text-base sm:text-lg font-bold ${
+                          scan.requires_id_check ? 'text-amber-700 dark:text-amber-300' : 'text-sky-700 dark:text-sky-300'
                         }`}
                       >
                         {scan.category_label}
@@ -305,26 +305,26 @@ const OperatorDashboard = () => {
                       </span>
                     </div>
                     {scan.requires_id_check && (
-                      <p className="mt-2 flex items-start gap-2 text-sm font-semibold text-amber-700">
+                      <p className="mt-2 flex items-start gap-2 text-xs sm:text-sm font-semibold text-amber-700 dark:text-amber-300">
                         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                         {scan.id_check_hint}
                       </p>
                     )}
                   </div>
                 ) : (
-                  <p className="rounded-2xl border border-dashed border-amber-500/40 px-4 py-3 text-xs text-amber-700">
+                  <p className="rounded-2xl border border-dashed border-amber-500/40 px-4 py-3 text-xs text-amber-700 dark:text-amber-300">
                     {scan.id_check_hint}
                   </p>
                 )}
 
-                <dl className="grid grid-cols-2 gap-3 text-sm">
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   <div>
                     <dt className="text-xs text-ebony/60 dark:text-cream/60">Pemesan</dt>
-                    <dd className="font-semibold">{scan.visitor_name || '-'}</dd>
+                    <dd className="font-semibold break-words">{scan.visitor_name || '-'}</dd>
                   </div>
                   <div>
                     <dt className="text-xs text-ebony/60 dark:text-cream/60">Kode Order</dt>
-                    <dd className="font-mono text-[13px]">{scan.order_code || '-'}</dd>
+                    <dd className="font-mono text-xs sm:text-[13px] break-all">{scan.order_code || '-'}</dd>
                   </div>
                   <div>
                     <dt className="text-xs text-ebony/60 dark:text-cream/60">Jenis Tiket</dt>
@@ -337,7 +337,7 @@ const OperatorDashboard = () => {
                 </dl>
 
                 {scan.quantity > 1 && scan.requires_id_check && (
-                  <p className="rounded-2xl bg-amber-500/10 px-4 py-3 text-xs font-semibold text-amber-700">
+                  <p className="rounded-2xl bg-amber-500/10 px-4 py-3 text-xs font-semibold text-amber-700 dark:text-amber-300">
                     Order rombongan ({scan.quantity} tiket) dengan tarif domestik. Periksa identitas tiap
                     pengunjung, bukan hanya pemesan.
                   </p>
@@ -346,7 +346,7 @@ const OperatorDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setScan(null)}
-                  className="w-full rounded-full border border-cream/60 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] dark:border-white/20"
+                  className="w-full rounded-full border border-cream/60 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] sm:tracking-[0.3em] dark:border-white/20"
                 >
                   Bersihkan
                 </button>
@@ -359,31 +359,31 @@ const OperatorDashboard = () => {
           </div>
 
           {/* KANAN - Log Validasi */}
-          <div className="glass-panel rounded-3xl p-5 max-h-[480px] flex flex-col justify-between">
+          <div className="min-w-0 glass-panel rounded-3xl p-4 sm:p-5 lg:max-h-[520px] flex flex-col justify-between">
             {/* Header */}
             <div>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="text-sm text-gold">Log Validasi</p>
                   <p className="text-xs text-ebony/60 dark:text-cream/60">
                     Jejak realtime setiap QR diterima petugas.
                   </p>
                 </div>
-                <span className="rounded-full bg-gold/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-gold">
+                <span className="shrink-0 rounded-full bg-gold/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-gold">
                   {recentLogs.length} entri
                 </span>
               </div>
 
               {/* List log scrollable */}
-              <div className="mt-4 space-y-3 text-sm overflow-y-auto max-h-[310px] pr-1 scrollbar-thin scrollbar-thumb-gold/40 scrollbar-track-transparent">
+              <div className="mt-4 space-y-2.5 sm:space-y-3 text-sm overflow-y-auto max-h-[280px] sm:max-h-[310px] pr-1 scrollbar-thin scrollbar-thumb-gold/40 scrollbar-track-transparent">
                 {paginatedLogs.length ? (
                   paginatedLogs.map((item) => (
                     <div
                       key={`${item.ticket_code}-${item.validated_at}`}
-                      className="rounded-2xl border border-cream/60 px-4 py-3 dark:border-white/10"
+                      className="rounded-2xl border border-cream/60 px-3.5 py-2.5 sm:px-4 sm:py-3 dark:border-white/10"
                     >
-                      <p className="font-semibold">{item.ticket_code}</p>
-                      <p className="text-xs text-ebony/60 dark:text-cream/60">
+                      <p className="font-mono text-xs sm:text-sm font-semibold break-all">{item.ticket_code}</p>
+                      <p className="mt-0.5 text-xs text-ebony/60 dark:text-cream/60">
                         {formatTimestamp(item.validated_at)}
                       </p>
                     </div>
@@ -398,17 +398,17 @@ const OperatorDashboard = () => {
 
             {/* Pagination */}
             {recentLogs.length > 0 && (
-              <div className="mt-4 flex items-center justify-between gap-2 text-xs uppercase tracking-[0.3em]">
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs uppercase tracking-[0.12em] sm:tracking-[0.25em]">
                 <button
                   type="button"
                   onClick={() => setLogPage((page) => Math.max(1, page - 1))}
                   disabled={logPage === 1}
-                  className="rounded-full border border-cream/60 px-3 py-1 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-full border border-cream/60 px-3 py-1.5 font-semibold disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20"
                 >
-                  Sebelumnya
+                  Prev
                 </button>
 
-                <div className="flex flex-wrap gap-1 text-[10px]">
+                <div className="flex flex-wrap justify-center gap-1 text-[10px]">
                   {logPages.map((page) => (
                     <button
                       key={`log-${page}`}
@@ -417,7 +417,7 @@ const OperatorDashboard = () => {
                       className={`h-7 w-7 rounded-full font-semibold ${
                         page === logPage
                           ? 'bg-gold text-ebony'
-                          : 'border border-cream/60 text-ebony/70 dark:text-cream/70'
+                          : 'border border-cream/60 text-ebony/70 dark:border-white/20 dark:text-cream/70'
                       }`}
                     >
                       {page}
@@ -429,9 +429,9 @@ const OperatorDashboard = () => {
                   type="button"
                   onClick={() => setLogPage((page) => Math.min(totalLogPages, page + 1))}
                   disabled={logPage === totalLogPages}
-                  className="rounded-full border border-cream/60 px-3 py-1 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-full border border-cream/60 px-3 py-1.5 font-semibold disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20"
                 >
-                  Berikutnya
+                  Next
                 </button>
               </div>
             )}
@@ -439,18 +439,73 @@ const OperatorDashboard = () => {
         </section>
 
         {/* ======= DAFTAR TIKET ======= */}
-        <section className="glass-panel rounded-3xl p-6">
-          <div className="flex items-center justify-between">
+        <section className="glass-panel rounded-3xl p-4 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <p className="text-sm text-gold">Daftar Tiket</p>
-              <h3 className="font-display text-2xl">Antrean yang siap dipindai</h3>
+              <h3 className="font-display text-xl sm:text-2xl">Antrean yang siap dipindai</h3>
             </div>
-            <span className="rounded-full bg-cream/60 px-4 py-1 text-xs font-semibold text-ebony/70 dark:bg-white/10 dark:text-cream/80">
+            <span className="shrink-0 rounded-full bg-cream/60 px-3.5 py-1 text-xs font-semibold text-ebony/70 dark:bg-white/10 dark:text-cream/80">
               {ticketsList.length} tiket
             </span>
           </div>
 
-          <div className="mt-4 overflow-x-auto">
+          {/* Tampilan Kartu khusus Mobile (< md) */}
+          <div className="mt-4 space-y-3 md:hidden">
+            {paginatedTickets.length ? (
+              paginatedTickets.map((ticket) => (
+                <div
+                  key={ticket.ticket_code}
+                  className="rounded-2xl border border-cream/60 p-3.5 space-y-2.5 dark:border-white/10"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-sm truncate">{ticket.customer || 'Tidak diketahui'}</p>
+                      <p className="mt-0.5 font-mono text-[11px] break-all text-ebony/60 dark:text-cream/60">
+                        {ticket.ticket_code}
+                      </p>
+                    </div>
+                    {ticket.category && (
+                      <span
+                        className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                          ticket.category === 'domestic'
+                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                            : 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
+                        }`}
+                      >
+                        {ticket.category === 'domestic' ? 'WNI' : 'WNA'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ebony/70 dark:text-cream/70">
+                    <span>
+                      {ticket.visit_date} · {ticket.start_time?.slice(0, 5)}
+                    </span>
+                    <span className="capitalize font-semibold">{ticket.status}</span>
+                  </div>
+                  {ticket.status === 'used' ? (
+                    <p className="text-center text-xs text-ebony/40 dark:text-cream/40 py-1">Sudah dipakai</p>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={mutation.isPending}
+                      onClick={() => mutation.mutate(ticket.ticket_code)}
+                      className="w-full rounded-xl bg-gold py-2 text-xs font-semibold text-ebony disabled:opacity-50"
+                    >
+                      Validasi Tiket
+                    </button>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p className="py-6 text-center text-xs text-ebony/60 dark:text-cream/60">
+                Belum ada tiket pada daftar ini.
+              </p>
+            )}
+          </div>
+
+          {/* Tampilan Tabel khusus Tablet & Desktop (>= md) */}
+          <div className="mt-4 hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase text-ebony/50 dark:text-cream/60">
@@ -473,8 +528,8 @@ const OperatorDashboard = () => {
                           <span
                             className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                               ticket.category === 'domestic'
-                                ? 'bg-amber-500/15 text-amber-700'
-                                : 'bg-sky-500/15 text-sky-700'
+                                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                                : 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
                             }`}
                           >
                             {ticket.category === 'domestic' ? 'WNI' : 'WNA'}
@@ -516,17 +571,17 @@ const OperatorDashboard = () => {
 
           {/* Pagination bawah */}
           {ticketsList.length > 0 && (
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs uppercase tracking-[0.3em]">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs uppercase tracking-[0.12em] sm:tracking-[0.25em]">
               <button
                 type="button"
                 onClick={() => setTicketPage((page) => Math.max(1, page - 1))}
                 disabled={ticketPage === 1}
-                className="rounded-full border border-cream/60 px-3 py-1 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-full border border-cream/60 px-3 py-1.5 font-semibold disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20"
               >
                 Sebelumnya
               </button>
 
-              <div className="flex flex-wrap gap-1 text-[10px]">
+              <div className="flex flex-wrap justify-center gap-1 text-[10px]">
                 {ticketPages.map((page) => (
                   <button
                     key={`ticket-${page}`}
@@ -535,7 +590,7 @@ const OperatorDashboard = () => {
                     className={`h-8 w-8 rounded-full font-semibold ${
                       page === ticketPage
                         ? 'bg-gold text-ebony'
-                        : 'border border-cream/60 text-ebony/70 dark:text-cream/70'
+                        : 'border border-cream/60 text-ebony/70 dark:border-white/20 dark:text-cream/70'
                     }`}
                   >
                     {page}
@@ -547,7 +602,7 @@ const OperatorDashboard = () => {
                 type="button"
                 onClick={() => setTicketPage((page) => Math.min(totalTicketPages, page + 1))}
                 disabled={ticketPage === totalTicketPages}
-                className="rounded-full border border-cream/60 px-3 py-1 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-full border border-cream/60 px-3 py-1.5 font-semibold disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20"
               >
                 Berikutnya
               </button>

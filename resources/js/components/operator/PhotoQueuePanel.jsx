@@ -100,27 +100,39 @@ const PhotoQueuePanel = () => {
   }, [nowServing?.id, nowServing?.status, nowServing?.called_at]);
 
   return (
-    <section className="glass-panel rounded-3xl p-6">
-      <div className="flex items-center justify-between">
+    <section className="glass-panel rounded-3xl p-4 sm:p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm text-gold">Antrean Foto</p>
-          <h3 className="font-display text-2xl">Kelola Panggilan</h3>
+          <h3 className="font-display text-xl sm:text-2xl">Kelola Panggilan</h3>
         </div>
-        <div className="flex items-center gap-2">
-          <select className="rounded-xl border border-cream/60 bg-transparent px-3 py-2" value={pointId || ''} onChange={(e) => setPointId(Number(e.target.value))}>
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <select
+            className="w-full sm:w-auto rounded-xl border border-cream/60 bg-white px-3 py-2 text-sm text-ebony dark:border-white/20 dark:bg-ebony/60 dark:text-cream"
+            value={pointId || ''}
+            onChange={(e) => setPointId(Number(e.target.value))}
+          >
             {(points || []).map((p) => (
               <option key={p.id} value={p.id} className="text-ebony">
                 {p.name}
               </option>
             ))}
           </select>
-          <input
-            type="date"
-            className="rounded-xl border border-cream/60 bg-transparent px-3 py-2"
-            value={selectedDate}
-            onChange={(e)=>setSelectedDate(e.target.value)}
-          />
-          <button onClick={() => callNext.mutate()} className="rounded-xl bg-gold px-4 py-2 text-sm font-semibold text-ebony">Next</button>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              className="min-w-0 flex-1 sm:flex-none rounded-xl border border-cream/60 bg-transparent px-3 py-2 text-sm dark:border-white/20"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => callNext.mutate()}
+              className="shrink-0 rounded-xl bg-gold px-4 py-2 text-sm font-semibold text-ebony"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 
@@ -128,21 +140,41 @@ const PhotoQueuePanel = () => {
         <div className="rounded-2xl border border-cream/60 p-4 dark:border-white/10">
           <p className="text-xs uppercase tracking-[0.3em] text-gold">Now Serving</p>
           {nowServing ? (
-            <div className="mt-2 flex items-center justify-between">
+            <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-4xl font-display">#{nowServing.queue_number}</p>
+                <p className="text-3xl sm:text-4xl font-display">#{nowServing.queue_number}</p>
                 <p className="text-sm text-ebony/70 dark:text-cream/70">Order #{nowServing.order_id}</p>
                 {nowServing.status === 'called' && (
-                  <p className="mt-1 text-xs text-amber-700">Waktu tersisa: {timeLeft !== null ? `${Math.floor(timeLeft/60)}:${String(timeLeft%60).padStart(2,'0')}` : '-'} sebelum auto-skip</p>
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                    Waktu tersisa: {timeLeft !== null ? `${Math.floor(timeLeft/60)}:${String(timeLeft%60).padStart(2,'0')}` : '-'} sebelum auto-skip
+                  </p>
                 )}
               </div>
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                 {nowServing.status !== 'shooting' && (
-                  <button onClick={() => markShooting.mutate(nowServing.id)} className="rounded-xl border px-3 py-2 text-sm">Mulai</button>
+                  <button
+                    type="button"
+                    onClick={() => markShooting.mutate(nowServing.id)}
+                    className="rounded-xl border border-cream/70 px-3 py-2 text-center text-sm font-medium dark:border-white/20"
+                  >
+                    Mulai
+                  </button>
                 )}
-                <button onClick={() => complete.mutate(nowServing.id)} className="rounded-xl bg-gold px-3 py-2 text-sm font-semibold text-ebony">Selesai</button>
-                <button onClick={() => skip.mutate(nowServing.id)} className="rounded-xl border px-3 py-2 text-sm">Skip</button>
-                <label className="rounded-xl border px-3 py-2 text-sm cursor-pointer">
+                <button
+                  type="button"
+                  onClick={() => complete.mutate(nowServing.id)}
+                  className="rounded-xl bg-gold px-3 py-2 text-center text-sm font-semibold text-ebony"
+                >
+                  Selesai
+                </button>
+                <button
+                  type="button"
+                  onClick={() => skip.mutate(nowServing.id)}
+                  className="rounded-xl border border-cream/70 px-3 py-2 text-center text-sm font-medium dark:border-white/20"
+                >
+                  Skip
+                </button>
+                <label className="cursor-pointer rounded-xl border border-gold/60 bg-gold/10 px-3 py-2 text-center text-sm font-semibold text-gold">
                   Upload Foto
                   <input type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={uploadFiles} />
                 </label>
@@ -159,8 +191,8 @@ const PhotoQueuePanel = () => {
             {waiting.length ? (
               <ul className="space-y-2">
                 {waiting.slice(0, 20).map((e) => (
-                  <li key={e.id} className="flex items-center justify-between rounded-xl border border-cream/50 px-3 py-2 text-sm dark:border-white/10">
-                    <span>#{e.queue_number}</span>
+                  <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-cream/50 px-3 py-2 text-sm dark:border-white/10">
+                    <span className="font-semibold">#{e.queue_number}</span>
                     <span className="text-ebony/70 dark:text-cream/70">Order #{e.order_id}</span>
                   </li>
                 ))}
@@ -178,11 +210,11 @@ const PhotoQueuePanel = () => {
           {skipped.length ? (
             <ul className="space-y-2">
               {skipped.slice(0, 10).map((e) => (
-                <li key={e.id} className="flex items-center justify-between rounded-xl border border-cream/50 px-3 py-2 text-sm dark:border-white/10">
-                  <span>#{e.queue_number}</span>
+                <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-cream/50 px-3 py-2 text-sm dark:border-white/10">
+                  <span className="font-semibold">#{e.queue_number}</span>
                   <div className="flex items-center gap-2">
                     <span className="text-ebony/70 dark:text-cream/70">Order #{e.order_id}</span>
-                    <button onClick={() => recall(e.id)} className="rounded-xl border px-3 py-1 text-xs">Recall</button>
+                    <button type="button" onClick={() => recall(e.id)} className="rounded-xl border border-cream/70 px-3 py-1 text-xs font-medium dark:border-white/20">Recall</button>
                   </div>
                 </li>
               ))}
@@ -197,12 +229,12 @@ const PhotoQueuePanel = () => {
       {nowServing?.assets?.length ? (
         <div className="mt-4 rounded-2xl border border-cream/60 p-4 dark:border-white/10">
           <p className="text-xs uppercase tracking-[0.3em] text-gold">Foto Terunggah</p>
-          <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
             {nowServing.assets.map((a) => {
               const photoUrl = a.url || `/photo-assets/${a.id}`;
               return (
-                <a key={a.id} href={photoUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl border border-cream/50">
-                  <img src={photoUrl} alt="Foto" className="h-32 w-full object-cover" />
+                <a key={a.id} href={photoUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl border border-cream/50 dark:border-white/10">
+                  <img src={photoUrl} alt="Foto" className="h-28 sm:h-32 w-full object-cover" />
                 </a>
               );
             })}

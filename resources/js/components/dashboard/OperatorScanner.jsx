@@ -371,8 +371,8 @@ const OperatorScanner = ({ onResult }) => {
         : 'Kamera tidak aktif';
 
   return (
-    <div className="glass-panel rounded-3xl p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="glass-panel rounded-3xl p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-1.5">
         <p className="font-semibold">Scan QR</p>
         <span
           className={`text-xs ${
@@ -387,13 +387,13 @@ const OperatorScanner = ({ onResult }) => {
         </span>
       </div>
 
-      <div className="relative mt-3 w-full overflow-hidden rounded-2xl bg-black" style={{ aspectRatio: '4 / 3' }}>
+      <div className="relative mt-3 w-full overflow-hidden rounded-2xl bg-black aspect-square sm:aspect-[4/3] max-h-[380px]">
         <video ref={videoRef} className="h-full w-full object-cover" playsInline muted autoPlay />
 
         {/* Panduan bidik: hanya visual, pemindaian tetap dilakukan pada seluruh frame */}
         {status === 'active' && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="relative h-[62%] aspect-square rounded-2xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.25)]">
+            <div className="relative h-[64%] aspect-square rounded-2xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.25)]">
               <span className="absolute -left-0.5 -top-0.5 h-6 w-6 rounded-tl-2xl border-l-4 border-t-4 border-gold" />
               <span className="absolute -right-0.5 -top-0.5 h-6 w-6 rounded-tr-2xl border-r-4 border-t-4 border-gold" />
               <span className="absolute -bottom-0.5 -left-0.5 h-6 w-6 rounded-bl-2xl border-b-4 border-l-4 border-gold" />
@@ -409,25 +409,24 @@ const OperatorScanner = ({ onResult }) => {
         )}
 
         {lastDetected && (
-          <div className="absolute inset-x-3 bottom-3 rounded-xl bg-emerald-600/90 px-3 py-2 text-center text-xs font-semibold text-white">
+          <div className="absolute inset-x-3 bottom-3 rounded-xl bg-emerald-600/90 px-3 py-2 text-center text-xs font-semibold text-white break-all">
             QR terbaca: <span className="font-mono">{lastDetected.code}</span>
           </div>
         )}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-3">
+      <div className="mt-3 flex flex-wrap items-center gap-2.5 sm:gap-3">
         <button
           type="button"
           onClick={handleRestart}
-          className="text-xs font-semibold text-gold underline-offset-2 hover:underline"
+          className="rounded-xl border border-gold/40 px-3 py-1.5 text-xs font-semibold text-gold hover:bg-gold/10"
         >
           Muat Ulang Kamera
         </button>
-        <span className="text-xs text-ebony/30 dark:text-cream/30">|</span>
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="text-xs font-semibold text-gold underline-offset-2 hover:underline"
+          className="rounded-xl border border-gold/40 px-3 py-1.5 text-xs font-semibold text-gold hover:bg-gold/10"
         >
           Upload Gambar QR
         </button>
@@ -437,7 +436,7 @@ const OperatorScanner = ({ onResult }) => {
           <select
             value={deviceId}
             onChange={(e) => setDeviceId(e.target.value)}
-            className="ml-auto max-w-[55%] rounded-xl border border-cream/70 bg-white px-2 py-1 text-xs text-ebony dark:border-white/20 dark:bg-ebony/60 dark:text-cream"
+            className="w-full sm:w-auto sm:ml-auto sm:max-w-[55%] rounded-xl border border-cream/70 bg-white px-3 py-2 sm:py-1.5 text-xs text-ebony dark:border-white/20 dark:bg-ebony/60 dark:text-cream"
           >
             <option value="">Kamera otomatis</option>
             {cameras.map((cam, idx) => (
@@ -455,14 +454,17 @@ const OperatorScanner = ({ onResult }) => {
         Tips: naikkan kecerahan layar HP pengunjung, jauhkan ±15–25 cm dari kamera, dan hindari pantulan lampu.
       </p>
 
-      <form onSubmit={handleManualSubmit} className="mt-4 flex gap-2">
+      <form onSubmit={handleManualSubmit} className="mt-4 flex flex-col gap-2 sm:flex-row">
         <input
           value={manualCode}
           onChange={(e) => setManualCode(e.target.value)}
           placeholder="Masukkan kode tiket / kode order"
-          className="flex-1 rounded-2xl border border-cream/70 bg-transparent px-3 py-2 text-sm dark:border-white/20"
+          className="min-w-0 flex-1 rounded-2xl border border-cream/70 bg-transparent px-3 py-2.5 text-sm dark:border-white/20"
         />
-        <button type="submit" className="rounded-2xl bg-gold px-4 text-sm font-semibold text-ebony">
+        <button
+          type="submit"
+          className="shrink-0 rounded-2xl bg-gold px-5 py-2.5 text-sm font-semibold text-ebony"
+        >
           Validasi
         </button>
       </form>

@@ -80,8 +80,8 @@ const Navbar = () => {
         isScrolled ? 'bg-cream/80 dark:bg-ebony/80 backdrop-blur-xl shadow-lg' : 'bg-transparent'
       }`}
     >
-      <div className="mx-auto flex max-w-6xl items-center gap-6 px-6 py-4">
-        <Link to="/" className="font-display text-2xl font-semibold text-gold flex-none">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-2 sm:gap-6 px-4 sm:px-6 py-3 sm:py-4">
+        <Link to="/" className="font-display text-xl sm:text-2xl font-semibold text-gold flex-none truncate">
           Pura Lempuyang
         </Link>
 
