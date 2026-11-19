@@ -75,6 +75,8 @@ export const endpoints = {
   weather: '/weather',
   register: '/auth/register',
   login: '/auth/login',
+  forgotPassword: '/auth/forgot-password',
+  resetPassword: '/auth/reset-password',
   profile: '/auth/me',
   profileUpdate: '/auth/profile',
   orders: '/orders',

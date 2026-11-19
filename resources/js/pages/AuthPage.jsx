@@ -93,7 +93,14 @@ const AuthPage = ({ mode = 'login' }) => {
               <input type="email" {...form.register('email', { required: true })} className="mt-2 w-full rounded-2xl border border-cream/60 bg-transparent px-3 py-2" />
             </div>
             <div>
-              <label className="text-xs font-semibold">{t('auth.password')}</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold">{t('auth.password')}</label>
+                {!isRegister && (
+                  <Link to="/forgot-password" className="text-xs text-gold hover:underline">
+                    Lupa password?
+                  </Link>
+                )}
+              </div>
               <input type="password" {...form.register('password', { required: true })} className="mt-2 w-full rounded-2xl border border-cream/60 bg-transparent px-3 py-2" />
             </div>
             {isRegister && (
