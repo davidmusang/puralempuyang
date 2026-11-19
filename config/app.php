@@ -65,7 +65,7 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    'timezone' => env('APP_TIMEZONE', 'Asia/Makassar'),
 
     'frontend_url' => env('FRONTEND_URL', env('APP_URL', 'http://localhost')),
 
